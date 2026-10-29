@@ -1,0 +1,14 @@
+# Data — reproducible via src/planscope/ingest.py
+data/raw/
+*.parquet
+*.jsonl
+
+# Python noise
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Environment & IDE
+.env
+.idea/
+venv/
