@@ -1,0 +1,24 @@
+[build-system]
+requires = ['setuptools>=69']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'planscope'
+version = '0.1.0'
+description = 'Machine learning over London planning applications'
+requires-python = '>=3.11'
+dependencies = [
+    'numpy',
+    'pandas>=3',
+    'pyarrow',
+    'requests',
+]
+
+[project.optional-dependencies]
+dev = ['pytest', 'ruff']
+
+[tool.ruff.lint]
+select = ['E4', 'E7', 'E9', 'F']
+
+[tool.pytest.ini_options]
+testpaths = ['tests']

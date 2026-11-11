@@ -38,6 +38,13 @@ CATEGORY_RULES = [
     ('advert', 'advert'),
 ]
 
+# Fields read from the application-form JSON (always present, even if every value is missing)
+FORM_FIELDS = [
+    'site_area', 'building_details',
+    'residential_details.total_no_proposed_residential_units',
+    'residential_details.total_no_existing_residential_units',
+]
+
 # Columns in the processed file, in order
 COLUMNS = [
     'id', 'lpa_name', 'lpa_app_no', 'valid_date', 'decision_date', 'outcome',
@@ -83,7 +90,7 @@ def to_category(app_type):
 def parse_form(details):
     '''Pull homes, storeys and site area out of the application-form JSON; impossible values become NaN.'''
     filled = details.dropna()
-    form = pd.json_normalize(filled.map(json.loads).tolist()).set_index(filled.index)
+    form = pd.json_normalize(filled.map(json.loads).tolist()).reindex(columns=FORM_FIELDS).set_index(filled.index)
     buildings = form['building_details'].explode().dropna()
     storeys = pd.to_numeric(buildings.map(lambda b: b.get('no_storeys')), errors='coerce').groupby(level=0).max()
     site = pd.to_numeric(form['site_area'], errors='coerce')
