@@ -4,6 +4,7 @@ Needs only onnxruntime and tokenizers, so it is light enough to serve from AWS L
 '''
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,9 @@ from tokenizers import Tokenizer
 
 MAX_TOKENS = 128  # must match training
 
+def prepare(text):
+    '''Tidy a description exactly as the training text was (clean_text, then normalise).'''
+    return re.sub(r'[\s\x00-\x1f\x7f]+', ' ', text).strip().lower().rstrip('.')
 
 class CategoryClassifier:
     '''Predict an application's category from its description.'''
@@ -26,7 +30,7 @@ class CategoryClassifier:
 
     def predict_proba(self, texts):
         '''Probability of every category for each text: an array of shape (texts, categories).'''
-        encodings = self.tokenizer.encode_batch(texts)
+        encodings = self.tokenizer.encode_batch([prepare(text) for text in texts])
         inputs = {
             'input_ids': np.array([e.ids for e in encodings], dtype=np.int64),
             'attention_mask': np.array([e.attention_mask for e in encodings], dtype=np.int64),

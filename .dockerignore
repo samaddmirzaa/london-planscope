@@ -1,0 +1,8 @@
+# Send Docker only what the image needs
+*
+!requirements-serve.txt
+!src/planscope/
+!models/category-onnx/model.int8.onnx
+!models/category-onnx/tokenizer.json
+!models/category-onnx/labels.json
+**/__pycache__
