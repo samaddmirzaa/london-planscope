@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Machine learning over London planning applications: a borough map and a live application classifier.">
+  <meta name="description" content="Machine learning over London planning applications: borough refusal rates, a refusal-risk model and an application classifier.">
   <title>PlanScope London</title>
   <style>
     /* Colours for light mode, swapped for dark mode below */
@@ -35,11 +35,14 @@
     .ramp { flex: 1; height: 0.6rem; border-radius: 0.3rem; background: linear-gradient(in oklab to right, var(--low), var(--high)); }
     #borough { min-height: 1.5em; font-weight: 600; }
 
-    /* Classifier */
+    /* Forms */
     textarea { box-sizing: border-box; width: 100%; padding: 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 0.375rem; }
+    .row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; }
+    .row > div { flex: 1 1 12rem; }
+    .row select { width: 100%; }
     button { cursor: pointer; }
-    #submit { background: var(--accent); color: white; border: 0; border-radius: 0.375rem; padding: 0.5rem 1.25rem; margin-top: 0.75rem; }
-    #submit:disabled { opacity: 0.6; cursor: wait; }
+    .primary { background: var(--accent); color: white; border: 0; border-radius: 0.375rem; padding: 0.5rem 1.25rem; margin-top: 0.75rem; }
+    .primary:disabled { opacity: 0.6; cursor: wait; }
     .examples { margin-top: 0.5rem; color: var(--muted); }
     .example { background: none; border: 1px solid var(--muted); border-radius: 1rem; padding: 0.1rem 0.6rem; margin: 0.2rem 0.2rem 0 0; }
     ol { list-style: none; padding: 0; }
@@ -63,7 +66,37 @@
       Refusal rate = refused ÷ (approved + refused), for applications validated <span id="period"></span>.
       Grey boroughs have fewer than 30 decisions of that type. Where the application form gave no type,
       the classifier below filled it in. Applications decided by the two development corporations (LLDC and OPDC) are not shown.
+      Barking and Dagenham's data records decisions mostly for householder and full planning applications,
+      so its rate for all applications leans towards those two types.
     </p>
+  </section>
+
+  <section>
+    <h2>Check an application's refusal risk</h2>
+    <form id="risk-form">
+      <label for="risk-description">Application description</label>
+      <textarea id="risk-description" rows="3" minlength="3" maxlength="5000" required
+                placeholder="Write it as a council would, e.g. Erection of a two storey rear extension"></textarea>
+      <div class="examples">Try:
+        <button type="button" class="example" data-borough="Camden">Erection of a two storey rear extension and roof terrace</button>
+        <button type="button" class="example" data-borough="Camden">Erection of a single storey rear extension</button>
+        <button type="button" class="example" data-borough="Newham">Retrospective change of use to a house in multiple occupation (HMO)</button>
+      </div>
+      <div class="row">
+        <div><label for="risk-borough">Borough</label><select id="risk-borough" required><option value="">Choose a borough</option></select></div>
+        <div><label for="risk-type">Application type</label><select id="risk-type"><option value="">Work it out from the description</option></select></div>
+      </div>
+      <button type="submit" class="primary">Check risk</button>
+    </form>
+    <p id="risk-status" role="status"></p>
+    <div id="risk-result" hidden>
+      <h3 id="risk-headline"></h3>
+      <p id="risk-context"></p>
+      <p id="risk-reasons"></p>
+    </div>
+    <p class="note">The chance of refusal if the application is decided, from a logistic regression trained on 2019–2025
+      London decisions (ROC-AUC 0.76; the riskiest tenth were refused three times as often as average).
+      It sees only the description, borough and type, not drawings, objections or policy: a guide, not a verdict.</p>
   </section>
 
   <section>
@@ -78,7 +111,7 @@
         <button type="button" class="example">Certificate of lawfulness for a proposed loft conversion with rear dormer</button>
         <button type="button" class="example">Change of use from office to residential</button>
       </div>
-      <button type="submit" id="submit">Classify</button>
+      <button type="submit" class="primary">Classify</button>
     </form>
     <p id="status" role="status"></p>
     <div id="result" hidden>
@@ -98,7 +131,7 @@
 
   <script>
     // The live API: AWS Lambda behind API Gateway, in the London region
-    const API_URL = 'https://ffchzj1mwk.execute-api.eu-west-2.amazonaws.com/classify';
+    const API = 'https://ffchzj1mwk.execute-api.eu-west-2.amazonaws.com';
     const MIN_DECISIONS = 30;
 
     // Readable names for the model's labels
@@ -116,6 +149,9 @@
     const name = (label) => NAMES[label] ?? label.replaceAll('_', ' ');
     const percent = (p) => `${(p * 100).toFixed(1)}%`;
     const $ = (selector) => document.querySelector(selector);
+
+    // ONS borough name -> the Datahub's name, as map_data.authority_name does in Python
+    const lpaName = (onsName) => onsName.replace(' upon Thames', '').replace(' and ', ' & ');
 
     // ---------- Borough map ----------
 
@@ -177,6 +213,9 @@
       filter.addEventListener('change', () => shade(paths, features, filter.value));
       shade(paths, features, 'all');
 
+      // The risk form's borough list comes from the same boroughs
+      features.map((f) => f.properties.name).sort().forEach((n) => $('#risk-borough').add(new Option(n, lpaName(n))));
+
       const total = features.reduce((sum, f) => sum + f.properties.stats.all[0], 0);
       $('#total').textContent = total.toLocaleString('en-GB');
       $('#period').textContent = period.join(' to ');
@@ -184,21 +223,77 @@
 
     drawMap().catch(() => { $('#borough').textContent = 'The map could not be loaded. Please refresh the page.'; });
 
-    // ---------- Classifier ----------
+    // ---------- Calling the API ----------
 
-    const form = $('#form');
-    const box = $('#description');
-    const button = $('#submit');
-    const statusLine = $('#status');
-    const result = $('#result');
+    // POST to the API, with a "waking up" note if it is slow and a friendly message if it fails
+    async function callApi(path, body, form, statusLine) {
+      const button = form.querySelector('.primary');
+      button.disabled = true;
+      statusLine.textContent = 'Working…';
+      // No answer after 2 seconds usually means the API is starting from cold
+      const slow = setTimeout(() => {
+        statusLine.textContent = 'Waking up the model. The first request after a quiet spell can take up to 20 seconds…';
+      }, 2000);
+      try {
+        const response = await fetch(`${API}${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(35000),
+        });
+        if (!response.ok) throw new Error(`The API could not answer that (HTTP ${response.status}).`);
+        statusLine.textContent = '';
+        return await response.json();
+      } catch (error) {
+        statusLine.textContent = error instanceof TypeError || error.name === 'TimeoutError'
+          ? 'Could not reach the API (it may be busy). Please try again in a few seconds.'
+          : error.message;
+        return null;
+      } finally {
+        clearTimeout(slow);
+        button.disabled = false;
+      }
+    }
 
-    // An example button copies its text into the box and classifies it
+    // An example button fills its form (and borough, if it names one), then submits it
     document.querySelectorAll('.example').forEach((example) => {
       example.addEventListener('click', () => {
-        box.value = example.textContent;
+        const form = example.closest('form');
+        form.querySelector('textarea').value = example.textContent;
+        if (example.dataset.borough) $('#risk-borough').value = example.dataset.borough;
         form.requestSubmit();
       });
     });
+
+    // ---------- Refusal risk ----------
+
+    Object.keys(NAMES).forEach((label) => $('#risk-type').add(new Option(NAMES[label], label)));
+
+    function showRisk(r) {
+      const borough = $('#risk-borough').selectedOptions[0].text;
+      $('#risk-headline').textContent = `Refusal risk: ${percent(r.risk)}`;
+      const type = `${name(r.category)}${r.category_predicted ? ' (worked out from your description)' : ''}`;
+      const average = r.borough_decisions >= MIN_DECISIONS
+        ? ` In the latest year, ${borough} refused ${percent(r.borough_average)} of ${r.borough_decisions.toLocaleString('en-GB')} decided applications of this type.`
+        : '';
+      $('#risk-context').textContent = `Type: ${type}.${average}`;
+      // Warn when the model knows too few of the words to say much beyond the borough and type
+      const unsure = r.words_known < 3 || r.words_known < r.words_total / 2
+        ? 'Few of these words appear in past applications, so this is mostly the borough and type average. ' : '';
+      const reasons = [r.raising.length && `Raised by: ${r.raising.join(', ')}.`, r.lowering.length && `Lowered by: ${r.lowering.join(', ')}.`];
+      $('#risk-reasons').textContent = unsure + reasons.filter(Boolean).join(' ');
+      $('#risk-result').hidden = false;
+    }
+
+    $('#risk-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      $('#risk-result').hidden = true;
+      const body = { description: $('#risk-description').value, borough: $('#risk-borough').value, category: $('#risk-type').value || null };
+      const r = await callApi('/predict', body, event.target, $('#risk-status'));
+      if (r) showRisk(r);
+    });
+
+    // ---------- Classifier ----------
 
     // Show the top category, then every category as a bar
     function show(prediction) {
@@ -211,36 +306,14 @@
         return row;
       });
       $('#probabilities').replaceChildren(...rows);
-      result.hidden = false;
+      $('#result').hidden = false;
     }
 
-    form.addEventListener('submit', async (event) => {
+    $('#form').addEventListener('submit', async (event) => {
       event.preventDefault();
-      button.disabled = true;
-      result.hidden = true;
-      statusLine.textContent = 'Classifying…';
-      // No answer after 2 seconds usually means the API is starting from cold
-      const slow = setTimeout(() => {
-        statusLine.textContent = 'Waking up the model. The first request after a quiet spell can take up to 20 seconds…';
-      }, 2000);
-      try {
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ description: box.value }),
-          signal: AbortSignal.timeout(35000),
-        });
-        if (!response.ok) throw new Error(`The API could not classify that (HTTP ${response.status}).`);
-        show(await response.json());
-        statusLine.textContent = '';
-      } catch (error) {
-        statusLine.textContent = error instanceof TypeError || error.name === 'TimeoutError'
-          ? 'Could not reach the API (it may be busy). Please try again in a few seconds.'
-          : error.message;
-      } finally {
-        clearTimeout(slow);
-        button.disabled = false;
-      }
+      $('#result').hidden = true;
+      const prediction = await callApi('/classify', { description: $('#description').value }, event.target, $('#status'));
+      if (prediction) show(prediction);
     });
   </script>
 </body>

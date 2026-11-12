@@ -5,4 +5,5 @@
 !models/category-onnx/model.int8.onnx
 !models/category-onnx/tokenizer.json
 !models/category-onnx/labels.json
+!models/outcome.json
 **/__pycache__

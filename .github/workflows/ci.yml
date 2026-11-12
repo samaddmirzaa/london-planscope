@@ -42,7 +42,9 @@ jobs:
           done
 
       - name: Download the model files
-        run: aws s3 sync "s3://$ModelBucket/category-onnx/" models/category-onnx/
+        run: |
+          aws s3 sync "s3://$ModelBucket/category-onnx/" models/category-onnx/
+          aws s3 cp "s3://$ModelBucket/outcome.json" models/outcome.json
 
       - run: sam build --config-env ci
       - run: sam deploy --config-env ci --s3-bucket "$ArtifactsBucket" --image-repository "$ImageRepositoryUri" --role-arn "$CloudFormationRoleArn"
@@ -52,3 +54,4 @@ jobs:
           url=$(aws cloudformation describe-stacks --stack-name planscope-api --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
           curl -sS --fail --retry 3 --max-time 30 "${url}health"
           curl -sS --fail --retry 3 --max-time 30 -H 'Content-Type: application/json' -d '{"description": "Erection of a single storey rear extension"}' "${url}classify"
+          curl -sS --fail --retry 3 --max-time 30 -H 'Content-Type: application/json' -d '{"description": "Erection of a two storey rear extension and roof terrace", "borough": "Camden"}' "${url}predict"

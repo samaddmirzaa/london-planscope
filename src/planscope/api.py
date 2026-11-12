@@ -1,5 +1,5 @@
 '''
-PlanScope API: classify a planning application from its description.
+PlanScope API: classify a planning application, and estimate its refusal risk.
 '''
 
 import os
@@ -7,18 +7,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from planscope.classifier import CategoryClassifier
+from planscope.risk import RiskModel
 
-MODEL_DIR = Path(os.environ.get('MODEL_DIR', Path(__file__).resolve().parents[2] / 'models' / 'category-onnx'))
+MODELS_DIR = Path(os.environ.get('MODELS_DIR', Path(__file__).resolve().parents[2] / 'models'))
 
-app = FastAPI(title='PlanScope London', version='0.1.0')
+app = FastAPI(title='PlanScope London', version='0.2.0')
 
 # Let web pages on other sites call the API (the browser's preflight check is answered here)
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['GET', 'POST'], allow_headers=['content-type'])
+
 
 class ClassifyRequest(BaseModel):
     description: str = Field(min_length=3, max_length=5000, examples=['Erection of a single storey rear extension'])
@@ -30,10 +32,33 @@ class ClassifyResponse(BaseModel):
     probabilities: dict[str, float]
 
 
+class PredictRequest(ClassifyRequest):
+    borough: str = Field(examples=['Camden'])
+    category: str | None = Field(default=None, examples=['householder'])
+
+
+class PredictResponse(BaseModel):
+    risk: float
+    category: str
+    category_predicted: bool
+    borough_average: float | None
+    borough_decisions: int
+    raising: list[str]
+    lowering: list[str]
+    words_known: int
+    words_total: int
+
+
 @lru_cache
 def get_classifier():
-    '''Load the model once, on first use, and reuse it for every request.'''
-    return CategoryClassifier(MODEL_DIR)
+    '''Load the category model once, on first use, and reuse it for every request.'''
+    return CategoryClassifier(MODELS_DIR / 'category-onnx')
+
+
+@lru_cache
+def get_risk_model():
+    '''Load the outcome model once, on first use.'''
+    return RiskModel(MODELS_DIR / 'outcome.json')
 
 
 @app.get('/health')
@@ -51,4 +76,30 @@ def classify(request: ClassifyRequest, classifier: Annotated[CategoryClassifier,
         category=ranked[0][0],
         confidence=round(ranked[0][1], 4),
         probabilities={label: round(p, 4) for label, p in ranked},
+    )
+
+
+@app.post('/predict')
+def predict(request: PredictRequest,
+            classifier: Annotated[CategoryClassifier, Depends(get_classifier)],
+            risk_model: Annotated[RiskModel, Depends(get_risk_model)]) -> PredictResponse:
+    '''Refusal risk if decided, with the words that raised and lowered it; the category is predicted if not given.'''
+    if request.borough not in risk_model.groups['lpa_name']:
+        raise HTTPException(422, f'Unknown borough: {request.borough}')
+    if request.category and request.category not in classifier.labels:
+        raise HTTPException(422, f'Unknown category: {request.category}')
+
+    category = request.category or classifier.predict([request.description])[0][0]
+    result = risk_model.predict(request.description, request.borough, category)
+    rate, decisions = result['average'] or (None, 0)
+    return PredictResponse(
+        risk=round(result['risk'], 4),
+        category=category,
+        category_predicted=not request.category,
+        borough_average=rate,
+        borough_decisions=decisions,
+        raising=result['raising'],
+        lowering=result['lowering'],
+        words_known=result['words_known'],
+        words_total=result['words_total'],
     )
