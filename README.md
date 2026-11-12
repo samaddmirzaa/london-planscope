@@ -23,7 +23,7 @@ Type a planning application description, as a council would write it, and choose
 | Predict refusal | TF-IDF text + borough × type, calibrated logistic regression | **ROC-AUC 0.76, PR-AUC 0.41** | Borough × type average 0.69 / 0.31; no skill 0.50 / 0.16 |
 | Find similar past decisions | TF-IDF cosine similarity within borough and type | **ROC-AUC 0.72** for the neighbours' refusal share | Sentence embeddings (MiniLM, BGE), borough only: 0.70–0.72, and they confuse direction |
 
-- **Macro-F1** Averages the score over all 9 types, so rare types count as much as common ones.
+- **Macro-F1:** Averages the score over all 9 types, so rare types count as much as common ones.
 - **ROC-AUC 0.76:** Shown one refused and one approved application, the model gives the refused one the higher risk 76% of the time.
 - **PR-AUC:** How well it finds refusals. Guessing scores 0.16, the share of applications refused.
 - **In practice:** The riskiest 10% of test applications were refused 47% of the time, against 16% overall.
@@ -49,6 +49,7 @@ flowchart LR
     E --> F
     F --> G[Static web page<br/>on Hugging Face]
 ```
+## Key Decisions
 
 - **API:** a Docker container on AWS Lambda (London region) behind API Gateway. It scales to zero, so the whole system costs under $1 a month.
 - **Serving needs No ML Frameworks:** The classifier runs on ONNX Runtime, and the risk model and search are re-implemented in numpy. A test checks the risk model matches scikit-learn to 1e-5.
