@@ -1,11 +1,11 @@
 '''
-Shared evaluation for the category classifiers: accuracy and macro-F1,
-each with a 95% bootstrap confidence interval.
+Shared evaluation with 95% bootstrap confidence intervals:
+accuracy and macro-F1 for the category classifier, ROC-AUC, PR-AUC and Brier score for the outcome model.
 '''
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, average_precision_score, brier_score_loss, f1_score, roc_auc_score
 
 
 def macro_f1(y_true, y_pred):
@@ -25,7 +25,17 @@ def bootstrap(metric, y_true, y_pred, n_boot=1000, seed=42):
     return metric(y_true, y_pred), low, high
 
 
-def evaluate(y_true, y_pred):
-    '''Accuracy and macro-F1 with confidence intervals, as a small table.'''
-    rows = {name: bootstrap(metric, y_true, y_pred) for name, metric in [('accuracy', accuracy_score), ('macro_f1', macro_f1)]}
+def report(metrics, y_true, y_pred):
+    '''Each (name, metric) pair with its confidence interval, as a small table.'''
+    rows = {name: bootstrap(metric, y_true, y_pred) for name, metric in metrics}
     return pd.DataFrame(rows, index=['score', 'ci_low', 'ci_high']).T.round(4)
+
+
+def evaluate(y_true, y_pred):
+    '''Category classifier: accuracy and macro-F1.'''
+    return report([('accuracy', accuracy_score), ('macro_f1', macro_f1)], y_true, y_pred)
+
+
+def evaluate_risk(y_true, risk):
+    '''Outcome model: ranking (ROC-AUC, PR-AUC) and probability quality (Brier score) of refusal risks.'''
+    return report([('roc_auc', roc_auc_score), ('pr_auc', average_precision_score), ('brier', brier_score_loss)], y_true, risk)
