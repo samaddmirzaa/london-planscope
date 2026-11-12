@@ -8,13 +8,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from planscope.risk import POST_SUBMISSION
+
 ROOT = Path(__file__).resolve().parents[2]
 CLEAN_PATH = ROOT / 'data' / 'processed' / 'applications.parquet'
 CATEGORIES_PATH = ROOT / 'data' / 'processed' / 'categories.parquet'
 OUT_PATH = ROOT / 'data' / 'processed' / 'outcome.parquet'
-
-# Text councils add to a description after submission: appeal links and amendment notes
-POST_SUBMISSION = r'linked cases:.*|\(?\b(?:amended|revised) (?:plans|drawings|description)\b\)?|\((?:amended|revised)\)'
 
 # Bin edges for the application-form numbers (one-hot encoded later; missing gets its own bin)
 BINS = {
