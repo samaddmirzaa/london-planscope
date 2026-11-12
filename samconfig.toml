@@ -1,5 +1,6 @@
 version = 0.1
 
+# Your laptop: sam build / sam deploy
 [default.global.parameters]
 stack_name = "planscope-api"
 region = "eu-west-2"
@@ -10,4 +11,15 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
 resolve_image_repos = true
+tags = "project=\"planscope\""
+
+# GitHub Actions: sam build --config-env ci / sam deploy --config-env ci
+[ci.global.parameters]
+stack_name = "planscope-api"
+region = "eu-west-2"
+
+[ci.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+fail_on_empty_changeset = false
 tags = "project=\"planscope\""

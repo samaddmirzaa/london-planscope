@@ -13,3 +13,42 @@ jobs:
       - run: pip install -e '.[dev,serve]'
       - run: ruff check .
       - run: pytest
+
+  deploy:
+    # Only after the tests pass, and only for pushes to main
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    concurrency: deploy
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: aws-actions/setup-sam@v3
+        with:
+          version: 1.172.1
+          use-installer: true
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: eu-west-2
+
+      - name: Read deployment settings from the planscope-ci stack
+        run: |
+          for key in ModelBucket ArtifactsBucket ImageRepositoryUri CloudFormationRoleArn; do
+            value=$(aws cloudformation describe-stacks --stack-name planscope-ci --query "Stacks[0].Outputs[?OutputKey=='$key'].OutputValue" --output text)
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Download the model files
+        run: aws s3 sync "s3://$ModelBucket/category-onnx/" models/category-onnx/
+
+      - run: sam build --config-env ci
+      - run: sam deploy --config-env ci --s3-bucket "$ArtifactsBucket" --image-repository "$ImageRepositoryUri" --role-arn "$CloudFormationRoleArn"
+
+      - name: Smoke test the live API
+        run: |
+          url=$(aws cloudformation describe-stacks --stack-name planscope-api --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+          curl -sS --fail --retry 3 --max-time 30 "${url}health"
+          curl -sS --fail --retry 3 --max-time 30 -H 'Content-Type: application/json' -d '{"description": "Erection of a single storey rear extension"}' "${url}classify"
