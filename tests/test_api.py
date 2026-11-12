@@ -30,3 +30,9 @@ def test_classify_returns_top_category_and_ranked_probabilities():
 
 def test_classify_rejects_a_too_short_description():
     assert client.post('/classify', json={'description': 'x'}).status_code == 422
+
+def test_browser_preflight_from_another_site_is_allowed():
+    headers = {'Origin': 'https://example.hf.space', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type'}
+    response = client.options('/classify', headers=headers)
+    assert response.status_code == 200
+    assert response.headers['access-control-allow-origin'] == '*'

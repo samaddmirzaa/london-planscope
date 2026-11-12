@@ -1,0 +1,42 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: PlanScope London API on AWS Lambda behind an HTTP API
+
+Resources:
+  # The FastAPI container, run by Lambda only when a request arrives
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures: [x86_64]
+      MemorySize: 1024
+      Timeout: 30
+      LoggingConfig:
+        LogGroup: !Ref ApiLogs
+      Events:
+        AllRequests:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+    Metadata:
+      DockerContext: .
+      Dockerfile: Dockerfile
+
+  # Public HTTPS endpoint, rate-limited (CORS is handled by the app)
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      DefaultRouteSettings:
+        ThrottlingRateLimit: 5
+        ThrottlingBurstLimit: 10
+
+  # Lambda's logs, deleted after 14 days so they never pile up
+  ApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the live API
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/'

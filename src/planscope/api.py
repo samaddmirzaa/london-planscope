@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from planscope.classifier import CategoryClassifier
@@ -16,6 +17,8 @@ MODEL_DIR = Path(os.environ.get('MODEL_DIR', Path(__file__).resolve().parents[2]
 
 app = FastAPI(title='PlanScope London', version='0.1.0')
 
+# Let web pages on other sites call the API (the browser's preflight check is answered here)
+app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['GET', 'POST'], allow_headers=['content-type'])
 
 class ClassifyRequest(BaseModel):
     description: str = Field(min_length=3, max_length=5000, examples=['Erection of a single storey rear extension'])

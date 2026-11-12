@@ -17,3 +17,9 @@ venv/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+
+# Trained models
+models/
+
+# SAM build output
+.aws-sam/

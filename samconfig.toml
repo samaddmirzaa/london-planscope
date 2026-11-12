@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "planscope-api"
+region = "eu-west-2"
+profile = "planscope"
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+resolve_image_repos = true
+tags = "project=\"planscope\""
