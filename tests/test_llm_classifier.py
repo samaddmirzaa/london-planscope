@@ -53,7 +53,7 @@ def test_calls_are_paced_to_the_quota_but_cached_answers_are_not(tmp_path):
     model = NovaClassifier('nova', requests_per_minute=600, client=FakeBedrock(), cache_path=tmp_path / 'c.jsonl')
     start = time.monotonic()
     model.classify_all(['a b', 'c d', 'e f', 'g h'])
-    assert time.monotonic() - start >= 0.3  # 4 calls at most 0.1 s apart
+    assert time.monotonic() - start >= 0.25  # 4 calls 0.1 s apart (0.3 s), less clock tolerance on Windows
     start = time.monotonic()
     model.classify_all(['a b', 'c d', 'e f', 'g h'])
     assert time.monotonic() - start < 0.1

@@ -45,6 +45,7 @@ jobs:
         run: |
           aws s3 sync "s3://$ModelBucket/category-onnx/" models/category-onnx/
           aws s3 cp "s3://$ModelBucket/outcome.json" models/outcome.json
+          aws s3 cp "s3://$ModelBucket/similar.npz" models/similar.npz
 
       - run: sam build --config-env ci
       - run: sam deploy --config-env ci --s3-bucket "$ArtifactsBucket" --image-repository "$ImageRepositoryUri" --role-arn "$CloudFormationRoleArn"

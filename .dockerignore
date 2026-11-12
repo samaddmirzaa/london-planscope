@@ -6,4 +6,5 @@
 !models/category-onnx/tokenizer.json
 !models/category-onnx/labels.json
 !models/outcome.json
+!models/similar.npz
 **/__pycache__

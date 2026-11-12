@@ -32,30 +32,32 @@ class RiskModel:
 
     def __init__(self, path):
         model = json.loads(Path(path).read_text())
-        self.index = {term: i for i, term in enumerate(model['terms'])}
+        self.terms = model['terms']
+        self.index = {term: i for i, term in enumerate(self.terms)}
         self.idf = np.array(model['idf'])
         self.weights = np.array(model['weights'])
         self.intercept = model['intercept']
         self.groups = model['groups']
         self.averages = model['averages']
 
+    def vectorize(self, text):
+        '''TF-IDF of prepared text: ids of the known terms and their weights, (1 + log count) x idf, scaled to length 1.'''
+        counts = Counter(self.index[term] for term in terms(text) if term in self.index)
+        ids = np.fromiter(counts, dtype=int, count=len(counts))
+        tfidf = (1 + np.log(np.fromiter(counts.values(), dtype=float, count=len(counts)))) * self.idf[ids]
+        return ids, tfidf / (np.linalg.norm(tfidf) or 1.0)
+
     def predict(self, description, borough, category):
         text = prepare(description)
-        counts = Counter(term for term in terms(text) if term in self.index)
-        known = list(counts)
-        ids = np.array([self.index[term] for term in known], dtype=int)
-
-        # TF-IDF: (1 + log count) x idf, scaled to length 1; then each term's share of the score
-        tfidf = (1 + np.log([counts[term] for term in known])) * self.idf[ids]
-        tfidf /= np.linalg.norm(tfidf) or 1.0
-        contributions = tfidf * self.weights[ids]
+        ids, tfidf = self.vectorize(text)
+        contributions = tfidf * self.weights[ids]  # each term's share of the score
 
         key = f'{borough} | {category}'
         group_score = sum(self.groups[col].get(value, 0.0)
                           for col, value in [('lpa_name', borough), ('category', category), ('lpa_category', key)])
         score = self.intercept + group_score + contributions.sum()
 
-        ranked = sorted(zip(known, contributions.tolist()), key=lambda pair: pair[1])
+        ranked = sorted(zip([self.terms[i] for i in ids], contributions.tolist()), key=lambda pair: pair[1])
         words = TOKEN.findall(text)
         return {
             'risk': 1 / (1 + math.exp(-score)),

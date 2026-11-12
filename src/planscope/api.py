@@ -1,5 +1,5 @@
 '''
-PlanScope API: classify a planning application, and estimate its refusal risk.
+PlanScope API: classify a planning application, estimate its refusal risk, and find similar past decisions.
 '''
 
 import os
@@ -13,10 +13,11 @@ from pydantic import BaseModel, Field
 
 from planscope.classifier import CategoryClassifier
 from planscope.risk import RiskModel
+from planscope.similar import SimilarSearch
 
 MODELS_DIR = Path(os.environ.get('MODELS_DIR', Path(__file__).resolve().parents[2] / 'models'))
 
-app = FastAPI(title='PlanScope London', version='0.2.0')
+app = FastAPI(title='PlanScope London', version='0.3.0')
 
 # Let web pages on other sites call the API (the browser's preflight check is answered here)
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['GET', 'POST'], allow_headers=['content-type'])
@@ -37,6 +38,15 @@ class PredictRequest(ClassifyRequest):
     category: str | None = Field(default=None, examples=['householder'])
 
 
+class SimilarApplication(BaseModel):
+    reference: str
+    date: str | None
+    outcome: str
+    description: str
+    url: str | None
+    similarity: float
+
+
 class PredictResponse(BaseModel):
     risk: float
     category: str
@@ -47,6 +57,7 @@ class PredictResponse(BaseModel):
     lowering: list[str]
     words_known: int
     words_total: int
+    similar: list[SimilarApplication]
 
 
 @lru_cache
@@ -59,6 +70,12 @@ def get_classifier():
 def get_risk_model():
     '''Load the outcome model once, on first use.'''
     return RiskModel(MODELS_DIR / 'outcome.json')
+
+
+@lru_cache
+def get_similar():
+    '''Load the similar-applications index once; it shares the outcome model's vocabulary.'''
+    return SimilarSearch(MODELS_DIR / 'similar.npz', get_risk_model())
 
 
 @app.get('/health')
@@ -82,8 +99,10 @@ def classify(request: ClassifyRequest, classifier: Annotated[CategoryClassifier,
 @app.post('/predict')
 def predict(request: PredictRequest,
             classifier: Annotated[CategoryClassifier, Depends(get_classifier)],
-            risk_model: Annotated[RiskModel, Depends(get_risk_model)]) -> PredictResponse:
-    '''Refusal risk if decided, with the words that raised and lowered it; the category is predicted if not given.'''
+            risk_model: Annotated[RiskModel, Depends(get_risk_model)],
+            similar: Annotated[SimilarSearch, Depends(get_similar)]) -> PredictResponse:
+    '''Refusal risk if decided, the words that raised and lowered it, and the most similar past decisions
+    in the same borough and type; the category is predicted if not given.'''
     if request.borough not in risk_model.groups['lpa_name']:
         raise HTTPException(422, f'Unknown borough: {request.borough}')
     if request.category and request.category not in classifier.labels:
@@ -102,4 +121,5 @@ def predict(request: PredictRequest,
         lowering=result['lowering'],
         words_known=result['words_known'],
         words_total=result['words_total'],
+        similar=similar.search(request.description, request.borough, category),
     )

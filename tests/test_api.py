@@ -1,7 +1,7 @@
 import numpy as np
 from fastapi.testclient import TestClient
 
-from planscope.api import app, get_classifier, get_risk_model
+from planscope.api import app, get_classifier, get_risk_model, get_similar
 
 
 class FakeClassifier:
@@ -25,9 +25,18 @@ class FakeRiskModel:
                 'words_known': 5, 'words_total': 6}
 
 
+class FakeSimilar:
+    '''Stands in for the similar-applications index.'''
+
+    def search(self, description, borough, category):
+        return [{'reference': '2024/0001/P', 'date': '2024-03', 'outcome': 'REFUSED', 'description': 'Roof terrace',
+                 'url': None, 'similarity': 0.9}]
+
+
 risk_model = FakeRiskModel()
 app.dependency_overrides[get_classifier] = FakeClassifier
 app.dependency_overrides[get_risk_model] = lambda: risk_model
+app.dependency_overrides[get_similar] = FakeSimilar
 client = TestClient(app)
 
 
@@ -61,7 +70,7 @@ def test_predict_uses_the_given_category():
     assert response.json() == {
         'risk': 0.1235, 'category': 'householder', 'category_predicted': False,
         'borough_average': 0.1, 'borough_decisions': 441, 'raising': ['roof terrace'], 'lowering': ['rear'],
-        'words_known': 5, 'words_total': 6,
+        'words_known': 5, 'words_total': 6, 'similar': FakeSimilar().search('', '', ''),
     }
 
 
