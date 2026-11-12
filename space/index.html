@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Machine learning over London planning applications: a borough map and a live application classifier.">
+  <title>PlanScope London</title>
+  <style>
+    /* Colours for light mode, swapped for dark mode below */
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff; --fg: #111827; --muted: #6b7280; --border: #d1d5db;
+      --accent: #1d4ed8; --bar: #dbeafe; --low: #dbeafe; --high: #1e3a8a; --none: #e5e7eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b1220; --fg: #e5e7eb; --muted: #9ca3af; --border: #374151;
+        --accent: #3b82f6; --bar: #1e3a5f; --low: #1e293b; --high: #93c5fd; --none: #1f2937;
+      }
+    }
+    body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; line-height: 1.5;
+           max-width: 42rem; margin: 0 auto; padding: 2rem 1rem; }
+    section { margin-top: 2.5rem; }
+    label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
+    select, textarea, button { font: inherit; color: inherit; }
+    select { background: var(--bg); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.25rem 0.5rem; }
+    .note, footer { color: var(--muted); font-size: 0.875rem; }
+    a { color: var(--accent); }
+
+    /* Map: borough outlines stay 1px wide however the map is scaled */
+    #map { display: block; width: 100%; height: auto; margin-top: 1rem; }
+    #map path { stroke: var(--bg); stroke-width: 1px; vector-effect: non-scaling-stroke; cursor: pointer; outline: none; }
+    #map path:hover, #map path:focus { stroke: var(--fg); stroke-width: 2px; }
+    .legend { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+    .ramp { flex: 1; height: 0.6rem; border-radius: 0.3rem; background: linear-gradient(in oklab to right, var(--low), var(--high)); }
+    #borough { min-height: 1.5em; font-weight: 600; }
+
+    /* Classifier */
+    textarea { box-sizing: border-box; width: 100%; padding: 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 0.375rem; }
+    button { cursor: pointer; }
+    #submit { background: var(--accent); color: white; border: 0; border-radius: 0.375rem; padding: 0.5rem 1.25rem; margin-top: 0.75rem; }
+    #submit:disabled { opacity: 0.6; cursor: wait; }
+    .examples { margin-top: 0.5rem; color: var(--muted); }
+    .example { background: none; border: 1px solid var(--muted); border-radius: 1rem; padding: 0.1rem 0.6rem; margin: 0.2rem 0.2rem 0 0; }
+    ol { list-style: none; padding: 0; }
+    li { display: flex; justify-content: space-between; padding: 0.25rem 0.5rem; margin-bottom: 0.25rem;
+         background: linear-gradient(to right, var(--bar) calc(var(--p) * 100%), transparent 0); }
+    li::after { content: attr(data-percent); font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <h1>PlanScope London</h1>
+  <p>Machine learning over <strong id="total">London's</strong> planning applications from the Planning London Datahub.</p>
+
+  <section>
+    <h2>How often each borough refuses</h2>
+    <label for="filter">Application type</label>
+    <select id="filter"><option value="all">All applications</option></select>
+    <svg id="map" aria-label="Map of London boroughs shaded by refusal rate"></svg>
+    <div class="legend"><span id="min"></span><span class="ramp"></span><span id="max"></span></div>
+    <p id="borough" aria-live="polite">Hover over or tap a borough.</p>
+    <p class="note">
+      Refusal rate = refused ÷ (approved + refused), for applications validated <span id="period"></span>.
+      Grey boroughs have fewer than 30 decisions of that type. Where the application form gave no type,
+      the classifier below filled it in. Applications decided by the two development corporations (LLDC and OPDC) are not shown.
+    </p>
+  </section>
+
+  <section>
+    <h2>Classify an application</h2>
+    <form id="form">
+      <label for="description">Application description</label>
+      <textarea id="description" rows="4" minlength="3" maxlength="5000" required></textarea>
+      <div class="examples">Try:
+        <button type="button" class="example">Erection of a single storey rear extension</button>
+        <button type="button" class="example">Fell one sycamore tree in the rear garden</button>
+        <button type="button" class="example">Display of an illuminated fascia sign above the shop front</button>
+        <button type="button" class="example">Certificate of lawfulness for a proposed loft conversion with rear dormer</button>
+        <button type="button" class="example">Change of use from office to residential</button>
+      </div>
+      <button type="submit" id="submit">Classify</button>
+    </form>
+    <p id="status" role="status"></p>
+    <div id="result" hidden>
+      <h3 id="category"></h3>
+      <ol id="probabilities"></ol>
+    </div>
+    <p class="note">A fine-tuned DistilBERT model running on AWS Lambda. Your text is classified and not stored.
+      Percentages are the model's scores, not guarantees.</p>
+  </section>
+
+  <footer>
+    <p>Planning data: Planning London Datahub, Greater London Authority.
+      Boundaries: Source: Office for National Statistics licensed under the Open Government Licence v.3.0.
+      Contains OS data © Crown copyright and database right 2024.</p>
+    <p><a href="https://github.com/samaddmirzaa/london-planscope">Code on GitHub</a></p>
+  </footer>
+
+  <script>
+    // The live API: AWS Lambda behind API Gateway, in the London region
+    const API_URL = 'https://ffchzj1mwk.execute-api.eu-west-2.amazonaws.com/classify';
+    const MIN_DECISIONS = 30;
+
+    // Readable names for the model's labels
+    const NAMES = {
+      advert: 'Advertisement consent',
+      amendment: 'Amendment to a permission',
+      conditions: 'Approval of conditions',
+      full_planning: 'Full planning permission',
+      householder: 'Householder',
+      lawful_development: 'Lawful development certificate',
+      listed_building: 'Listed building consent',
+      prior_approval: 'Prior approval',
+      trees: 'Tree works',
+    };
+    const name = (label) => NAMES[label] ?? label.replaceAll('_', ' ');
+    const percent = (p) => `${(p * 100).toFixed(1)}%`;
+    const $ = (selector) => document.querySelector(selector);
+
+    // ---------- Borough map ----------
+
+    // Draw lon/lat directly as SVG x/y. At London's latitude a degree of longitude
+    // is only cos(51.5°) ≈ 0.62 as long as a degree of latitude, so shrink x by that.
+    const K = Math.cos(51.5 * Math.PI / 180);
+    const point = ([lon, lat]) => `${(lon * K).toFixed(5)},${(-lat).toFixed(5)}`;
+    const pathData = (geometry) => (geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates)
+      .flat().map((ring) => `M${ring.map(point).join('L')}Z`).join('');
+
+    // Refusal rate and counts for one borough and application type (null if too few decisions)
+    function rate(stats, type) {
+      const [applications, approved, refused] = stats[type] ?? [0, 0, 0];
+      const decided = approved + refused;
+      return { applications, decided, refused, value: decided >= MIN_DECISIONS ? refused / decided : null };
+    }
+
+    function describe(feature, type) {
+      const r = rate(feature.properties.stats, type);
+      const n = (x) => x.toLocaleString('en-GB');
+      return r.value === null
+        ? `${feature.properties.name}: fewer than ${MIN_DECISIONS} decisions`
+        : `${feature.properties.name}: ${percent(r.value)} refused (${n(r.refused)} of ${n(r.decided)} decisions, ${n(r.applications)} applications)`;
+    }
+
+    // Shade every borough between the lowest and highest rate for the chosen type
+    function shade(paths, features, type) {
+      const values = features.map((f) => rate(f.properties.stats, type).value).filter((v) => v !== null);
+      const [lo, hi] = [Math.min(...values), Math.max(...values)];
+      features.forEach((feature, i) => {
+        const v = rate(feature.properties.stats, type).value;
+        const t = v === null ? null : (v - lo) / (hi - lo || 1);
+        paths[i].style.fill = t === null ? 'var(--none)' : `color-mix(in oklab, var(--high) ${t * 100}%, var(--low))`;
+        paths[i].setAttribute('aria-label', describe(feature, type));
+      });
+      [$('#min').textContent, $('#max').textContent] = [percent(lo), percent(hi)];
+      $('#borough').textContent = 'Hover over or tap a borough.';
+    }
+
+    async function drawMap() {
+      const { features, period } = await (await fetch('boroughs.geojson')).json();
+      const svg = $('#map');
+      const filter = $('#filter');
+
+      const paths = features.map((feature) => {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', pathData(feature.geometry));
+        path.setAttribute('tabindex', '0');
+        const show = () => { $('#borough').textContent = describe(feature, filter.value); };
+        ['mouseenter', 'focus', 'click'].forEach((event) => path.addEventListener(event, show));
+        svg.append(path);
+        return path;
+      });
+      // Fit the view to the drawn boroughs
+      const bounds = svg.getBBox();
+      svg.setAttribute('viewBox', `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`);
+
+      Object.keys(NAMES).forEach((label) => filter.add(new Option(NAMES[label], label)));
+      filter.addEventListener('change', () => shade(paths, features, filter.value));
+      shade(paths, features, 'all');
+
+      const total = features.reduce((sum, f) => sum + f.properties.stats.all[0], 0);
+      $('#total').textContent = total.toLocaleString('en-GB');
+      $('#period').textContent = period.join(' to ');
+    }
+
+    drawMap().catch(() => { $('#borough').textContent = 'The map could not be loaded. Please refresh the page.'; });
+
+    // ---------- Classifier ----------
+
+    const form = $('#form');
+    const box = $('#description');
+    const button = $('#submit');
+    const statusLine = $('#status');
+    const result = $('#result');
+
+    // An example button copies its text into the box and classifies it
+    document.querySelectorAll('.example').forEach((example) => {
+      example.addEventListener('click', () => {
+        box.value = example.textContent;
+        form.requestSubmit();
+      });
+    });
+
+    // Show the top category, then every category as a bar
+    function show(prediction) {
+      $('#category').textContent = `${name(prediction.category)} (${percent(prediction.confidence)})`;
+      const rows = Object.entries(prediction.probabilities).map(([label, p]) => {
+        const row = document.createElement('li');
+        row.textContent = name(label);
+        row.dataset.percent = percent(p);
+        row.style.setProperty('--p', p);
+        return row;
+      });
+      $('#probabilities').replaceChildren(...rows);
+      result.hidden = false;
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      result.hidden = true;
+      statusLine.textContent = 'Classifying…';
+      // No answer after 2 seconds usually means the API is starting from cold
+      const slow = setTimeout(() => {
+        statusLine.textContent = 'Waking up the model. The first request after a quiet spell can take up to 20 seconds…';
+      }, 2000);
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: box.value }),
+          signal: AbortSignal.timeout(35000),
+        });
+        if (!response.ok) throw new Error(`The API could not classify that (HTTP ${response.status}).`);
+        show(await response.json());
+        statusLine.textContent = '';
+      } catch (error) {
+        statusLine.textContent = error instanceof TypeError || error.name === 'TimeoutError'
+          ? 'Could not reach the API (it may be busy). Please try again in a few seconds.'
+          : error.message;
+      } finally {
+        clearTimeout(slow);
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
