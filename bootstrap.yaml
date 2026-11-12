@@ -4,7 +4,8 @@ Description: Lets GitHub Actions deploy the planscope-api stack, with no stored 
 Parameters:
   GitHubRepo:
     Type: String
-    Default: samaddmirzaa/london-planscope
+    Description: Owner@ownerId/repo@repoId, the form GitHub uses in OIDC tokens for repos created after July 15, 2026
+    Default: samaddmirzaa@236439601/london-planscope@1438588400
   ArtifactsBucket:
     Type: String
     Description: SAM's managed bucket, shown in the sam deploy output
