@@ -64,8 +64,6 @@ flowchart LR
 
 ## How it was Built
 
-Each notebook ends with a findings cell recording what was tested and why each choice was made.
-
 | Notebook | What it covers |
 |---|---|
 | [01 Data profiling](notebooks/01_data_profiling.ipynb) | Data quality, coverage by borough and year, cleaning rules |
