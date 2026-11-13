@@ -82,28 +82,9 @@ template.yaml    the API's AWS infrastructure (SAM)
 bootstrap.yaml   GitHub-to-AWS deploy permissions
 ```
 
-## Run it locally
-
-Requires Python 3.11.
-
-```bash
-pip install -e ".[dev,serve]"
-python -m planscope.ingest          # download the applications (about 1.3M records)
-python -m planscope.clean
-python -m planscope.category_data
-# fine-tune DistilBERT in notebooks/02 (GPU; needs pip install -e ".[train]"), then:
-python -m planscope.export_onnx
-python -m planscope.fill_categories
-python -m planscope.outcome_data
-python -m planscope.outcome_model
-python -m planscope.similar
-python -m planscope.map_data        # the map's borough data
-uvicorn planscope.api:app --reload  # then open http://localhost:8000/docs
-```
-
-## Data and limitations
+## Data and Limitations
 
 - **Data:** [Planning London Datahub](https://www.london.gov.uk/programmes-strategies/planning/digital-planning/planning-london-datahub), Greater London Authority, used with permission. The data and trained models are not in this repository; the scripts above rebuild them.
-- **What the risk model can't see:** it reads only the description, borough and type, not drawings, objections or planning policy. It's a guide, not a verdict.
-- **Limited by the data itself:** identical descriptions are sometimes filed under different types, which caps text-only classification at about 91% accuracy. Councils don't publish refusal reasons in this dataset.
-- **Drift:** refusal rates change over time, so the risk model should be recalibrated as new decisions arrive.
+- **What the risk model can't see:** It reads only the description, borough and type, not drawings, objections or planning policy. It's a guide, not a verdict.
+- **Limited by the data itself:** Identical descriptions are sometimes filed under different types, which caps text-only classification at about 91% accuracy. Councils don't publish refusal reasons in this dataset.
+- **Drift:** Refusal rates may change over time, so the risk model should be recalibrated as new decisions arrive.
