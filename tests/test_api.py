@@ -8,16 +8,16 @@ class FakeClassifier:
     '''Stands in for the real model, so the API is tested without model files.'''
     labels = ['householder', 'trees']
 
-    def predict_proba(self, texts):
-        return np.array([[0.2, 0.8]])
-
-    def predict(self, texts):
-        return ['trees'], np.array([0.8])
+    def logits(self, texts):
+        # Softmax gives exactly 0.2 and 0.8; adding 10 to both keeps those probabilities but makes the energy 10,
+        # a strong response like a real planning description's
+        return np.log(np.array([[0.2, 0.8]])) + 10
 
 
 class FakeRiskModel:
     '''Stands in for the outcome model; remembers the category it was asked about.'''
     groups = {'lpa_name': {'Camden': 0.1}}
+    index = {'prune', 'oak', 'tree', 'roof', 'terrace', 'fell', 'one'}
 
     def predict(self, description, borough, category):
         self.category = category
@@ -49,7 +49,8 @@ def test_health():
 def test_classify_returns_top_category_and_ranked_probabilities():
     response = client.post('/classify', json={'description': 'Prune 1 x oak tree'})
     assert response.status_code == 200
-    assert response.json() == {'category': 'trees', 'confidence': 0.8, 'probabilities': {'trees': 0.8, 'householder': 0.2}}
+    assert response.json() == {'category': 'trees', 'confidence': 0.8, 'probabilities': {'trees': 0.8, 'householder': 0.2},
+                               'familiar': True}
 
 
 def test_classify_rejects_a_too_short_description():
@@ -70,7 +71,7 @@ def test_predict_uses_the_given_category():
     assert response.json() == {
         'risk': 0.1235, 'category': 'householder', 'category_predicted': False,
         'borough_average': 0.1, 'borough_decisions': 441, 'raising': ['roof terrace'], 'lowering': ['rear'],
-        'words_known': 5, 'words_total': 6, 'similar': FakeSimilar().search('', '', ''),
+        'words_known': 5, 'words_total': 6, 'similar': FakeSimilar().search('', '', ''), 'familiar': True,
     }
 
 
@@ -84,6 +85,7 @@ def test_predict_rejects_unknown_borough_and_category():
     assert client.post('/predict', json={'description': 'Roof terrace', 'borough': 'Paris'}).status_code == 422
     request = {'description': 'Roof terrace', 'borough': 'Camden', 'category': 'castle'}
     assert client.post('/predict', json=request).status_code == 422
+
 
 def test_warm_builds_each_model_once(monkeypatch):
     '''/warm loads every model through the cached loaders, so later requests reuse them.'''
@@ -101,3 +103,10 @@ def test_warm_builds_each_model_once(monkeypatch):
     finally:
         for loader in loaders:
             loader.cache_clear()
+
+
+def test_unfamiliar_text_is_flagged_by_both_endpoints():
+    '''Words the risk model has never seen make the coverage check fail.'''
+    description = 'asdf qwerty zxcv'
+    assert client.post('/classify', json={'description': description}).json()['familiar'] is False
+    assert client.post('/predict', json={'description': description, 'borough': 'Camden'}).json()['familiar'] is False
