@@ -4,7 +4,7 @@
 
 **Machine Learning over 1.3 million London Planning Applications: What Type an Application is, How Likely it is to be Refused, and Which Past Decisions it most resembles.**
 
-**[Try the live demo](https://huggingface.co/spaces/samaddmirzaa/planscope-london)** · [API docs](https://ffchzj1mwk.execute-api.eu-west-2.amazonaws.com/docs)
+**[Try the Live Demo](https://huggingface.co/spaces/samaddmirzaa/planscope-london)** · [API docs](https://ffchzj1mwk.execute-api.eu-west-2.amazonaws.com/docs)
 
 ![PlanScope London: borough refusal map and refusal-risk checker](docs/screenshot.png)
 
