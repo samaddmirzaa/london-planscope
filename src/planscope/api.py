@@ -11,7 +11,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from planscope.classifier import CategoryClassifier
+from planscope.classifier import CategoryClassifier, softmax
+from planscope.familiar import is_familiar
 from planscope.risk import RiskModel
 from planscope.similar import SimilarSearch
 
@@ -31,6 +32,7 @@ class ClassifyResponse(BaseModel):
     category: str
     confidence: float
     probabilities: dict[str, float]
+    familiar: bool
 
 
 class PredictRequest(ClassifyRequest):
@@ -58,6 +60,7 @@ class PredictResponse(BaseModel):
     words_known: int
     words_total: int
     similar: list[SimilarApplication]
+    familiar: bool
 
 
 @lru_cache
@@ -83,6 +86,7 @@ def health():
     '''Liveness check used by the deployment.'''
     return {'status': 'ok'}
 
+
 @app.get('/warm')
 def warm():
     '''Load every model now, so a visitor's first real request is fast. The page calls this when it opens.'''
@@ -90,15 +94,20 @@ def warm():
     get_similar()  # also loads the risk model, which it reuses
     return {'status': 'warm'}
 
+
 @app.post('/classify')
-def classify(request: ClassifyRequest, classifier: Annotated[CategoryClassifier, Depends(get_classifier)]) -> ClassifyResponse:
-    '''Most likely application category for a description, with every category's probability.'''
-    probs = classifier.predict_proba([request.description])[0]
-    ranked = sorted(zip(classifier.labels, probs.tolist()), key=lambda pair: pair[1], reverse=True)
+def classify(request: ClassifyRequest,
+             classifier: Annotated[CategoryClassifier, Depends(get_classifier)],
+             risk_model: Annotated[RiskModel, Depends(get_risk_model)]) -> ClassifyResponse:
+    '''Most likely application category for a description, with every category's probability,
+    and whether the description looks like a planning application at all.'''
+    logits = classifier.logits([request.description])[0]
+    ranked = sorted(zip(classifier.labels, softmax(logits).tolist()), key=lambda pair: pair[1], reverse=True)
     return ClassifyResponse(
         category=ranked[0][0],
         confidence=round(ranked[0][1], 4),
         probabilities={label: round(p, 4) for label, p in ranked},
+        familiar=is_familiar(request.description, logits, risk_model.index),
     )
 
 
@@ -108,13 +117,15 @@ def predict(request: PredictRequest,
             risk_model: Annotated[RiskModel, Depends(get_risk_model)],
             similar: Annotated[SimilarSearch, Depends(get_similar)]) -> PredictResponse:
     '''Refusal risk if decided, the words that raised and lowered it, and the most similar past decisions
-    in the same borough and type; the category is predicted if not given.'''
+    in the same borough and type; the category is predicted if not given. Also whether the description
+    looks like a planning application at all.'''
     if request.borough not in risk_model.groups['lpa_name']:
         raise HTTPException(422, f'Unknown borough: {request.borough}')
     if request.category and request.category not in classifier.labels:
         raise HTTPException(422, f'Unknown category: {request.category}')
 
-    category = request.category or classifier.predict([request.description])[0][0]
+    logits = classifier.logits([request.description])[0]
+    category = request.category or classifier.labels[int(logits.argmax())]
     result = risk_model.predict(request.description, request.borough, category)
     rate, decisions = result['average'] or (None, 0)
     return PredictResponse(
@@ -128,4 +139,5 @@ def predict(request: PredictRequest,
         words_known=result['words_known'],
         words_total=result['words_total'],
         similar=similar.search(request.description, request.borough, category),
+        familiar=is_familiar(request.description, logits, risk_model.index),
     )

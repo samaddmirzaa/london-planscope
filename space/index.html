@@ -168,6 +168,9 @@
     const percent = (p) => `${(p * 100).toFixed(1)}%`;
     const $ = (selector) => document.querySelector(selector);
 
+    // Shown instead of a result when the API says the text doesn't look like a planning application
+    const UNFAMILIAR = "This doesn't look like a planning application description. Try writing it the way a council would, e.g. Erection of a single storey rear extension.";
+
     // ONS borough name -> the Datahub's name, as map_data.authority_name does in Python
     const lpaName = (onsName) => onsName.replace(' upon Thames', '').replace(' and ', ' & ');
 
@@ -307,11 +310,8 @@
         ? ` In the latest year, ${borough} refused ${percent(r.borough_average)} of ${r.borough_decisions.toLocaleString('en-GB')} decided applications of this type.`
         : '';
       $('#risk-context').textContent = `Type: ${type}.${average}`;
-      // Warn when the model knows too few of the words to say much beyond the borough and type
-      const unsure = r.words_known < 3 || r.words_known < r.words_total / 2
-        ? 'Few of these words appear in past applications, so this is mostly the borough and type average. ' : '';
       const reasons = [r.raising.length && `Raised by: ${r.raising.join(', ')}.`, r.lowering.length && `Lowered by: ${r.lowering.join(', ')}.`];
-      $('#risk-reasons').textContent = unsure + reasons.filter(Boolean).join(' ');
+      $('#risk-reasons').textContent = reasons.filter(Boolean).join(' ');
       showSimilar(r.similar, borough);
       $('#risk-result').hidden = false;
     }
@@ -341,7 +341,9 @@
       $('#risk-result').hidden = true;
       const body = { description: $('#risk-description').value, borough: $('#risk-borough').value, category: $('#risk-type').value || null };
       const r = await callApi('/predict', body, event.target, $('#risk-status'));
-      if (r) showRisk(r);
+      if (!r) return;
+      if (r.familiar === false) $('#risk-status').textContent = UNFAMILIAR;
+      else showRisk(r);
     });
 
     // ---------- Classifier ----------
@@ -364,7 +366,9 @@
       event.preventDefault();
       $('#result').hidden = true;
       const prediction = await callApi('/classify', { description: $('#description').value }, event.target, $('#status'));
-      if (prediction) show(prediction);
+      if (!prediction) return;
+      if (prediction.familiar === false) $('#status').textContent = UNFAMILIAR;
+      else show(prediction);
     });
   </script>
 </body>

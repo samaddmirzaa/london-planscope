@@ -17,6 +17,11 @@ def prepare(text):
     '''Tidy a description exactly as the training text was (clean_text, then normalise).'''
     return re.sub(r'[\s\x00-\x1f\x7f]+', ' ', text).strip().lower().rstrip('.')
 
+def softmax(logits):
+    '''Turn logits into probabilities that sum to 1 along the last axis.'''
+    scores = np.exp(logits - logits.max(axis=-1, keepdims=True))
+    return scores / scores.sum(axis=-1, keepdims=True)
+
 class CategoryClassifier:
     '''Predict an application's category from its description.'''
 
@@ -39,9 +44,7 @@ class CategoryClassifier:
 
     def predict_proba(self, texts):
         '''Probability of every category for each text: an array of shape (texts, categories).'''
-        logits = self.logits(texts)
-        scores = np.exp(logits - logits.max(axis=1, keepdims=True))
-        return scores / scores.sum(axis=1, keepdims=True)
+        return softmax(self.logits(texts))
 
     def predict(self, texts):
         '''Most likely category and its probability for each text.
