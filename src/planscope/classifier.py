@@ -28,14 +28,18 @@ class CategoryClassifier:
         self.tokenizer.enable_padding()
         self.session = ort.InferenceSession(str(model_dir / model_file), providers=['CPUExecutionProvider'])
 
-    def predict_proba(self, texts):
-        '''Probability of every category for each text: an array of shape (texts, categories).'''
+    def logits(self, texts):
+        '''Raw scores for every category, before softmax: an array of shape (texts, categories).'''
         encodings = self.tokenizer.encode_batch([prepare(text) for text in texts])
         inputs = {
             'input_ids': np.array([e.ids for e in encodings], dtype=np.int64),
             'attention_mask': np.array([e.attention_mask for e in encodings], dtype=np.int64),
         }
-        logits = self.session.run(['logits'], inputs)[0]
+        return self.session.run(['logits'], inputs)[0]
+
+    def predict_proba(self, texts):
+        '''Probability of every category for each text: an array of shape (texts, categories).'''
+        logits = self.logits(texts)
         scores = np.exp(logits - logits.max(axis=1, keepdims=True))
         return scores / scores.sum(axis=1, keepdims=True)
 
