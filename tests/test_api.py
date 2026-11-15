@@ -84,3 +84,20 @@ def test_predict_rejects_unknown_borough_and_category():
     assert client.post('/predict', json={'description': 'Roof terrace', 'borough': 'Paris'}).status_code == 422
     request = {'description': 'Roof terrace', 'borough': 'Camden', 'category': 'castle'}
     assert client.post('/predict', json=request).status_code == 422
+
+def test_warm_builds_each_model_once(monkeypatch):
+    '''/warm loads every model through the cached loaders, so later requests reuse them.'''
+    built = []
+    monkeypatch.setattr('planscope.api.CategoryClassifier', lambda path: built.append('classifier'))
+    monkeypatch.setattr('planscope.api.RiskModel', lambda path: built.append('risk'))
+    monkeypatch.setattr('planscope.api.SimilarSearch', lambda path, risk_model: built.append('similar'))
+    loaders = (get_classifier, get_risk_model, get_similar)
+    for loader in loaders:
+        loader.cache_clear()
+    try:
+        assert client.get('/warm').json() == {'status': 'warm'}
+        client.get('/warm')
+        assert built == ['classifier', 'risk', 'similar']
+    finally:
+        for loader in loaders:
+            loader.cache_clear()

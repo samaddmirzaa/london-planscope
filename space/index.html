@@ -146,6 +146,10 @@
   <script>
     // The live API: AWS Lambda behind API Gateway, in the London region
     const API = 'https://ffchzj1mwk.execute-api.eu-west-2.amazonaws.com';
+
+    // Wake the API as soon as the page opens, so the models are loaded before anyone clicks
+    fetch(`${API}/warm`).catch(() => {});
+
     const MIN_DECISIONS = 30;
 
     // Readable names for the model's labels
@@ -239,6 +243,23 @@
 
     // ---------- Calling the API ----------
 
+    // POST once; a failed connection is usually a cold start, so it is retried a single time
+    async function post(path, body) {
+      const request = () => fetch(`${API}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(35000),
+      });
+      try {
+        return await request();
+      } catch (error) {
+        if (!(error instanceof TypeError)) throw error;  // a timeout is not retried: the visitor has waited long enough
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return await request();
+      }
+    }
+
     // POST to the API, with a "waking up" note if it is slow and a friendly message if it fails
     async function callApi(path, body, form, statusLine) {
       const button = form.querySelector('.primary');
@@ -249,12 +270,7 @@
         statusLine.textContent = 'Waking up the model. The first request after a quiet spell can take up to 20 seconds…';
       }, 2000);
       try {
-        const response = await fetch(`${API}${path}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(35000),
-        });
+        const response = await post(path, body);
         if (!response.ok) throw new Error(`The API could not answer that (HTTP ${response.status}).`);
         statusLine.textContent = '';
         return await response.json();

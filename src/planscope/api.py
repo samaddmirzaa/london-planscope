@@ -83,6 +83,12 @@ def health():
     '''Liveness check used by the deployment.'''
     return {'status': 'ok'}
 
+@app.get('/warm')
+def warm():
+    '''Load every model now, so a visitor's first real request is fast. The page calls this when it opens.'''
+    get_classifier()
+    get_similar()  # also loads the risk model, which it reuses
+    return {'status': 'warm'}
 
 @app.post('/classify')
 def classify(request: ClassifyRequest, classifier: Annotated[CategoryClassifier, Depends(get_classifier)]) -> ClassifyResponse:
